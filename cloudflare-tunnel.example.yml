@@ -1,0 +1,11 @@
+# Cloudflare Tunnel config for AfriKAD backend (webhooks)
+# Copy to cloudflare-tunnel.yml and fill in your values.
+# See CLOUDFLARE_TUNNEL_SETUP.md for setup steps.
+
+tunnel: afrikad-backend
+credentials-file: /path/to/your/.cloudflare/afrikad-backend.json
+
+ingress:
+  - hostname: afrikad-backend.your-domain.com
+    service: http://localhost:5001
+  - service: http_status:404
