@@ -42,6 +42,12 @@ router.post('/register', [
   body('password').isLength({ min: 6 }),
   body('firstName').notEmpty().trim(),
   body('lastName').notEmpty().trim(),
+  body('username')
+    .notEmpty()
+    .trim()
+    .isLength({ min: 3, max: 30 })
+    .matches(/^[a-zA-Z0-9_]+$/)
+    .withMessage('Username must be 3–30 characters (letters, numbers, underscore only).'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -50,6 +56,9 @@ router.post('/register', [
     }
 
     const { email, password, firstName, lastName, phone, username } = req.body;
+    const normalizedUsername = String(username || '')
+      .trim()
+      .toLowerCase();
 
     // Check if user exists
     const existingUser = await User.findOne({ email });
@@ -60,15 +69,12 @@ router.post('/register', [
       });
     }
 
-    // Check if username is taken (if provided)
-    if (username) {
-      const existingUsername = await User.findOne({ username });
-      if (existingUsername) {
-        return res.status(400).json({
-          success: false,
-          message: 'Username already taken.',
-        });
-      }
+    const existingUsername = await User.findOne({ username: normalizedUsername });
+    if (existingUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username already taken.',
+      });
     }
 
     const emailVerificationToken = crypto.randomBytes(32).toString('hex');
@@ -80,7 +86,7 @@ router.post('/register', [
       firstName,
       lastName,
       phone,
-      username,
+      username: normalizedUsername,
       emailVerificationToken: emailVerificationTokenHash,
       emailVerificationExpires: new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY_MS),
     });
