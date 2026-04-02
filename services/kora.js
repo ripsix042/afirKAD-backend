@@ -4,6 +4,11 @@ const KORA_BASE_URL = process.env.KORA_BASE_URL || 'https://api.korapay.com';
 const KORA_API_KEY = process.env.KORA_API_KEY;
 const KORA_SECRET_KEY = process.env.KORA_SECRET_KEY;
 
+/** Avoid calling Kora FX on every wallet poll + stop log spam (same bad response each time). */
+const FX_RATE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let fxRateCache = null; // { rate, from_currency, to_currency, expiry_in_seconds?, expiresAt }
+let fxRateNonJsonWarned = false;
+
 class KoraService {
   constructor() {
     this.client = axios.create({
@@ -227,6 +232,31 @@ class KoraService {
   async getFxRate(fromCurrency = 'USD', toCurrency = 'NGN') {
     const FALLBACK_RATE = 1600; // 1 USD = 1600 NGN (fallback when API unavailable or product not enabled)
     const path = '/api/v1/conversions/rates';
+    const now = Date.now();
+    if (
+      fxRateCache &&
+      fxRateCache.from_currency === fromCurrency &&
+      fxRateCache.to_currency === toCurrency &&
+      now < fxRateCache.expiresAt
+    ) {
+      const out = {
+        rate: fxRateCache.rate,
+        from_currency: fxRateCache.from_currency,
+        to_currency: fxRateCache.to_currency,
+      };
+      if (fxRateCache.expiry_in_seconds != null) {
+        out.expiry_in_seconds = fxRateCache.expiry_in_seconds;
+      }
+      return out;
+    }
+
+    const setCache = (payload) => {
+      fxRateCache = {
+        ...payload,
+        expiresAt: now + FX_RATE_CACHE_TTL_MS,
+      };
+    };
+
     try {
       const response = await this.client.post(path, {
         from_currency: fromCurrency,
@@ -237,15 +267,21 @@ class KoraService {
       const raw = response.data;
       // Kora may return "Welcome to Kora" (string) or HTML when endpoint is wrong or product not enabled
       if (raw == null || typeof raw !== 'object') {
-        console.warn(
-          'Kora getFxRate: response is not JSON (got "' + String(raw).slice(0, 50) + '").',
-          'Check KORA_BASE_URL (use https://api.korapay.com) and enable Currency Conversion on Kora dashboard.'
-        );
-        return {
+        if (!fxRateNonJsonWarned) {
+          fxRateNonJsonWarned = true;
+          console.warn(
+            'Kora getFxRate: response is not JSON (got "' + String(raw).slice(0, 50) + '").',
+            'Check KORA_BASE_URL (use https://api.korapay.com) and enable Currency Conversion on Kora dashboard.',
+            '(Further identical warnings suppressed until restart; FX rate cached for 5 min.)'
+          );
+        }
+        const fallback = {
           rate: FALLBACK_RATE,
           from_currency: fromCurrency,
           to_currency: toCurrency,
         };
+        setCache(fallback);
+        return fallback;
       }
       const data = raw?.data || raw;
       let rate = data?.rate != null ? Number(data.rate) : null;
@@ -253,34 +289,47 @@ class KoraService {
         rate = Number(data.to_amount) / Number(data.from_amount);
       }
       if (rate == null || !Number.isFinite(rate) || rate <= 0) {
-        console.warn('Kora getFxRate: no valid rate in response, using fallback', { data });
-        return {
+        if (!fxRateNonJsonWarned) {
+          fxRateNonJsonWarned = true;
+          console.warn('Kora getFxRate: no valid rate in response, using fallback', { data });
+        }
+        const fallback = {
           rate: FALLBACK_RATE,
           from_currency: fromCurrency,
           to_currency: toCurrency,
         };
+        setCache(fallback);
+        return fallback;
       }
-      return {
+      const ok = {
         rate,
         from_currency: data?.from_currency || fromCurrency,
         to_currency: data?.to_currency || toCurrency,
         expiry_in_seconds: data?.expiry_in_seconds,
       };
+      setCache(ok);
+      return ok;
     } catch (error) {
       const status = error.response?.status;
       const body = error.response?.data;
-      console.warn(
-        'Kora getFxRate error (using fallback):',
-        status,
-        body?.message || body?.error || error.message,
-        '(URL: ' + (this.client.defaults?.baseURL || '') + path + ')',
-        body?.message ? '' : 'Enable Currency Conversion on Kora dashboard for real rates.'
-      );
-      return {
+      if (!fxRateNonJsonWarned) {
+        fxRateNonJsonWarned = true;
+        console.warn(
+          'Kora getFxRate error (using fallback):',
+          status,
+          body?.message || body?.error || error.message,
+          '(URL: ' + (this.client.defaults?.baseURL || '') + path + ')',
+          body?.message ? '' : 'Enable Currency Conversion on Kora dashboard for real rates.',
+          '(Further identical warnings suppressed until restart; FX rate cached for 5 min.)'
+        );
+      }
+      const fallback = {
         rate: FALLBACK_RATE,
         from_currency: fromCurrency,
         to_currency: toCurrency,
       };
+      setCache(fallback);
+      return fallback;
     }
   }
 

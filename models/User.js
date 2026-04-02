@@ -33,6 +33,11 @@ const userSchema = new mongoose.Schema({
     trim: true,
     sparse: true, // Allows multiple null values but enforces uniqueness for non-null
   },
+  profileImage: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   dateOfBirth: {
     type: Date,
   },

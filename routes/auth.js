@@ -112,6 +112,7 @@ router.post('/register', [
         lastName: user.lastName,
         phone: user.phone,
         username: user.username,
+        profileImage: user.profileImage || '',
         wallet: user.wallet,
         emailVerified: user.emailVerified,
       },
@@ -171,6 +172,7 @@ router.post('/login', [
         lastName: user.lastName,
         phone: user.phone,
         username: user.username,
+        profileImage: user.profileImage || '',
         wallet: user.wallet,
         role: user.role,
         emailVerified: user.emailVerified,
@@ -307,6 +309,7 @@ router.get('/me', authenticate, async (req, res) => {
         lastName: user.lastName,
         phone: user.phone,
         username: user.username,
+        profileImage: user.profileImage || '',
         wallet: user.wallet,
         role: user.role,
         emailVerified: user.emailVerified,
@@ -325,6 +328,11 @@ router.put('/profile', authenticate, [
   body('email').optional().isEmail().normalizeEmail(),
   body('firstName').optional().notEmpty().trim(),
   body('lastName').optional().notEmpty().trim(),
+  body('profileImage')
+    .optional()
+    .isString()
+    .isLength({ max: 500000 })
+    .withMessage('Profile image is too large.'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -332,7 +340,7 @@ router.put('/profile', authenticate, [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { firstName, lastName, email, phone, username } = req.body;
+    const { firstName, lastName, email, phone, username, profileImage } = req.body;
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -371,6 +379,9 @@ router.put('/profile', authenticate, [
     if (firstName) user.firstName = firstName;
     if (lastName) user.lastName = lastName;
     if (phone !== undefined) user.phone = phone || undefined;
+    if (profileImage !== undefined) {
+      user.profileImage = typeof profileImage === 'string' ? profileImage.trim() : '';
+    }
 
     user.updatedAt = Date.now();
     await user.save();
@@ -385,6 +396,7 @@ router.put('/profile', authenticate, [
         lastName: user.lastName,
         phone: user.phone,
         username: user.username,
+        profileImage: user.profileImage || '',
         wallet: user.wallet,
         role: user.role,
       },
