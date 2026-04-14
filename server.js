@@ -11,6 +11,9 @@ const adminRoutes = require('./routes/admin');
 const webhookRoutes = require('./routes/webhooks');
 const cardsRoutes = require('./routes/cards');
 const supportRoutes = require('./routes/support');
+const kycRoutes = require('./routes/kyc');
+const transferRoutes = require('./routes/transfer');
+const maintenanceMiddleware = require('./middleware/maintenance');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -51,6 +54,9 @@ app.use('/api/auth/forgot-password/otp', authLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Global Maintenance Check
+app.use(maintenanceMiddleware);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
@@ -61,6 +67,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/cards', cardsRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/kyc', kycRoutes);
+app.use('/api/transfer', transferRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

@@ -66,6 +66,24 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user',
   },
+  kycStatus: {
+    type: String,
+    enum: ['none', 'pending', 'verified', 'rejected'],
+    default: 'none',
+  },
+  kycDocuments: [{
+    type: { type: String, enum: ['passport', 'national_id', 'drivers_license'] },
+    number: String,
+    imageUrl: String, // Store base64 or cloudinary URL
+    submittedAt: { type: Date, default: Date.now }
+  }],
+  kycRejectionReason: {
+    type: String,
+    default: '',
+  },
+  lastKycSubmission: {
+    type: Date,
+  },
   wallet: {
     ngn: {
       type: Number,

@@ -8,7 +8,7 @@ const transactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['deposit', 'withdrawal', 'payment', 'fx_conversion', 'card_payment'],
+    enum: ['deposit', 'withdrawal', 'payment', 'fx_conversion', 'card_payment', 'transfer'],
     required: true,
   },
   status: {
@@ -23,7 +23,7 @@ const transactionSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    enum: ['NGN', 'USD'],
+    enum: ['NGN', 'USD', 'GHS', 'KES'],
     required: true,
   },
   fxRate: {
@@ -34,13 +34,21 @@ const transactionSchema = new mongoose.Schema({
   },
   convertedCurrency: {
     type: String,
-    enum: ['NGN', 'USD'],
+    enum: ['NGN', 'USD', 'GHS', 'KES'],
   },
   description: {
     type: String,
   },
   merchantName: {
     type: String,
+  },
+  recipient: {
+    name: String,
+    bankName: String,
+    accountNumber: String,
+    countryCode: String,
+    routingNumber: String,
+    narration: String,
   },
   paymentMethod: {
     type: String,
@@ -54,11 +62,12 @@ const transactionSchema = new mongoose.Schema({
   },
   paymentReference: {
     type: String,
-    // KoraPay reference for webhook matching
   },
   errorMessage: {
     type: String,
   },
+  fxMarkupPercent: { type: Number },
+  flatFeeNgn: { type: Number },
   metadata: {
     type: mongoose.Schema.Types.Mixed,
   },

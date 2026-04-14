@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const GlobalConfig = require('../models/GlobalConfig');
 
 const router = express.Router();
 
@@ -482,21 +483,46 @@ router.get('/disputes', async (req, res) => {
   }
 });
 
-// KYC/Compliance endpoint
+// KYC stats (counts per status)
+router.get('/kyc/stats', async (req, res) => {
+  try {
+    const counts = await User.aggregate([
+      { $group: { _id: '$kycStatus', count: { $sum: 1 } } },
+    ]);
+    const stats = { none: 0, pending: 0, verified: 0, rejected: 0 };
+    for (const c of counts) {
+      if (c._id in stats) stats[c._id] = c.count;
+    }
+    res.json({ success: true, stats });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch KYC stats.' });
+  }
+});
+
+// KYC/Compliance endpoint - List users by status
 router.get('/kyc', async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, level } = req.query;
+    const { page = 1, limit = 20, status = 'pending' } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // For now, return empty array. Can be enhanced with a KYC model later
+    const query = { kycStatus: status };
+    const users = await User.find(query)
+      .select('firstName lastName email kycStatus kycDocuments lastKycSubmission')
+      .sort({ lastKycSubmission: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await User.countDocuments(query);
+
     res.json({
       success: true,
-      kyc: [],
+      kyc: users,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: 0,
-        pages: 0,
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
       },
     });
   } catch (error) {
@@ -505,6 +531,71 @@ router.get('/kyc', async (req, res) => {
       success: false,
       message: 'Failed to fetch KYC data.',
     });
+  }
+});
+
+// Approve KYC
+router.post('/kyc/approve/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId);
+    
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    
+    user.kycStatus = 'verified';
+    user.kycRejectionReason = '';
+    await user.save();
+
+    res.json({ success: true, message: 'User KYC approved successfully.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to approve KYC.' });
+  }
+});
+
+// Reject KYC
+router.post('/kyc/reject/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+    
+    if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    
+    user.kycStatus = 'rejected';
+    user.kycRejectionReason = reason;
+    await user.save();
+
+    res.json({ success: true, message: 'User KYC rejected.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to reject KYC.' });
+  }
+});
+
+// Maintenance Mode
+router.get('/config', async (req, res) => {
+  try {
+    const config = await GlobalConfig.getConfig();
+    res.json({ success: true, config });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch config.' });
+  }
+});
+
+router.post('/config', async (req, res) => {
+  try {
+    const { maintenanceMode, maintenanceMessage, minAppVersion } = req.body;
+    let config = await GlobalConfig.getConfig();
+    
+    if (maintenanceMode !== undefined) config.maintenanceMode = maintenanceMode;
+    if (maintenanceMessage !== undefined) config.maintenanceMessage = maintenanceMessage;
+    if (minAppVersion !== undefined) config.minAppVersion = minAppVersion;
+
+    await config.save();
+    res.json({ success: true, config, message: 'Configuration updated successfully.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update config.' });
   }
 });
 

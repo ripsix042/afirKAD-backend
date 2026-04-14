@@ -494,6 +494,83 @@ class KoraService {
   }
 
   /**
+   * Get banks for a specific country (for international transfer recipient forms).
+   * Uses Kora's misc/banks endpoint with countryCode param.
+   * Falls back to a static list for supported countries.
+   */
+  async getBanksByCountry(countryCode) {
+    const paths = [
+      `/merchant/api/v1/misc/banks?countryCode=${countryCode}`,
+      `/api/v1/misc/banks?countryCode=${countryCode}`,
+    ];
+    for (const path of paths) {
+      try {
+        const response = await this.client.get(path);
+        const normalized = this._normalizeBanksResponse(response.data);
+        if (normalized.length > 0) return { data: normalized };
+      } catch (_) { /* try next */ }
+    }
+    const staticMap = {
+      GH: GHANA_BANKS,
+      KE: KENYA_BANKS,
+      ZA: SOUTH_AFRICA_BANKS,
+      TZ: TANZANIA_BANKS,
+      UG: UGANDA_BANKS,
+    };
+    return { data: staticMap[countryCode] || [] };
+  }
+
+  /**
+   * Initiate an international transfer (cross-border disbursement).
+   * Kora disburse endpoint with destination currency matching the country.
+   */
+  async initiateInternationalTransfer({ reference, amountNgn, recipientCurrency, bankCode, accountNumber, recipientName, recipientEmail, narration, metadata = {} }) {
+    if (!KORA_SECRET_KEY || !String(KORA_SECRET_KEY).trim()) {
+      throw new Error('KORA_SECRET_KEY is not set.');
+    }
+    const amountNum = Math.round(Number(amountNgn) * 100) / 100;
+    const meta = Object.keys(metadata || {}).length ? metadata : undefined;
+    const payload = {
+      reference: String(reference),
+      destination: {
+        type: 'bank_account',
+        amount: amountNum,
+        currency: recipientCurrency,
+        narration: narration || 'International transfer via AfriKAD',
+        bank_account: {
+          bank: String(bankCode).trim(),
+          account: String(accountNumber).trim(),
+        },
+        customer: {
+          name: recipientName || undefined,
+          email: recipientEmail || 'noreply@afrikad.com',
+        },
+      },
+      ...(meta && { metadata: meta }),
+    };
+
+    const endpoints = [
+      '/merchant/api/v1/transactions/disburse',
+      '/api/v1/transactions/disburse',
+    ];
+    let lastError = null;
+    for (const path of endpoints) {
+      try {
+        const response = await this.client.post(path, payload);
+        return response.data;
+      } catch (err) {
+        const d = err.response?.data;
+        lastError = err;
+        const isNotAuth = d?.error === 'not_authorized' || String(d?.message || '').toLowerCase().includes('not authorized');
+        if (isNotAuth && path !== endpoints[endpoints.length - 1]) continue;
+        break;
+      }
+    }
+    const d = lastError?.response?.data;
+    throw new Error(d?.message || 'International transfer failed');
+  }
+
+  /**
    * Normalize Kora banks response to { code, name }[].
    * Kora may return { data: [...] }, { banks: [...] }, or array; items may be { code, name }, { bank_code, bank_name }, etc.
    */
@@ -533,6 +610,38 @@ class KoraService {
     }
     console.info(`Kora banks API unavailable; using static list (${NIGERIAN_BANKS_AND_MFB_LIST.length} banks).`);
     return { data: NIGERIAN_BANKS_AND_MFB_LIST };
+  }
+
+  /**
+   * Resolve / verify a bank account name.
+   * POST /merchant/api/v1/misc/banks/resolve
+   */
+  async resolveAccount(bankCode, accountNumber) {
+    const endpoints = [
+      '/merchant/api/v1/misc/banks/resolve',
+      '/api/v1/misc/banks/resolve',
+    ];
+    const payload = {
+      bank: bankCode,
+      account: accountNumber,
+    };
+
+    let lastError = null;
+    for (const path of endpoints) {
+      try {
+        const response = await this.client.post(path, payload);
+        return response.data;
+      } catch (err) {
+        lastError = err;
+        const d = err.response?.data;
+        const isNotAuth = d?.error === 'not_authorized' || String(d?.message || '').toLowerCase().includes('not authorized');
+        if (isNotAuth && path !== endpoints[endpoints.length - 1]) continue;
+        break;
+      }
+    }
+    const d = lastError?.response?.data;
+    console.error('Kora resolveAccount error:', d || lastError.message);
+    throw new Error(d?.message || 'Failed to verify account');
   }
 }
 
@@ -590,6 +699,65 @@ const NIGERIAN_BANKS_AND_MFB_LIST = [
   { code: '50022', name: 'FairMoney Microfinance Bank' },
   { code: '50023', name: 'Carbon' },
   { code: '50024', name: 'Quickteller Paypoint (Interswitch)' },
+];
+
+const GHANA_BANKS = [
+  { code: 'GH010100', name: 'Ghana Commercial Bank' },
+  { code: 'GH010200', name: 'Ecobank Ghana' },
+  { code: 'GH010300', name: 'Absa Bank Ghana' },
+  { code: 'GH010400', name: 'Standard Chartered Ghana' },
+  { code: 'GH010500', name: 'Stanbic Bank Ghana' },
+  { code: 'GH010600', name: 'Zenith Bank Ghana' },
+  { code: 'GH010700', name: 'Access Bank Ghana' },
+  { code: 'GH010800', name: 'UBA Ghana' },
+  { code: 'GH010900', name: 'Fidelity Bank Ghana' },
+  { code: 'GH011000', name: 'MTN Mobile Money' },
+  { code: 'GH011100', name: 'Vodafone Cash' },
+  { code: 'GH011200', name: 'AirtelTigo Money' },
+];
+
+const KENYA_BANKS = [
+  { code: 'KE010100', name: 'Equity Bank Kenya' },
+  { code: 'KE010200', name: 'KCB Bank' },
+  { code: 'KE010300', name: 'Co-operative Bank of Kenya' },
+  { code: 'KE010400', name: 'Standard Chartered Kenya' },
+  { code: 'KE010500', name: 'Absa Bank Kenya' },
+  { code: 'KE010600', name: 'Stanbic Bank Kenya' },
+  { code: 'KE010700', name: 'NCBA Bank' },
+  { code: 'KE010800', name: 'DTB Bank Kenya' },
+  { code: 'KE010900', name: 'M-Pesa (Safaricom)' },
+  { code: 'KE011000', name: 'Airtel Money Kenya' },
+];
+
+const SOUTH_AFRICA_BANKS = [
+  { code: 'ZA010100', name: 'Standard Bank South Africa' },
+  { code: 'ZA010200', name: 'Absa Bank South Africa' },
+  { code: 'ZA010300', name: 'FNB (First National Bank)' },
+  { code: 'ZA010400', name: 'Nedbank' },
+  { code: 'ZA010500', name: 'Capitec Bank' },
+  { code: 'ZA010600', name: 'Investec Bank' },
+  { code: 'ZA010700', name: 'Discovery Bank' },
+];
+
+const TANZANIA_BANKS = [
+  { code: 'TZ010100', name: 'CRDB Bank' },
+  { code: 'TZ010200', name: 'NMB Bank Tanzania' },
+  { code: 'TZ010300', name: 'Stanbic Bank Tanzania' },
+  { code: 'TZ010400', name: 'Standard Chartered Tanzania' },
+  { code: 'TZ010500', name: 'Equity Bank Tanzania' },
+  { code: 'TZ010600', name: 'M-Pesa Tanzania' },
+  { code: 'TZ010700', name: 'Tigo Pesa' },
+  { code: 'TZ010800', name: 'Airtel Money Tanzania' },
+];
+
+const UGANDA_BANKS = [
+  { code: 'UG010100', name: 'Stanbic Bank Uganda' },
+  { code: 'UG010200', name: 'Equity Bank Uganda' },
+  { code: 'UG010300', name: 'DFCU Bank' },
+  { code: 'UG010400', name: 'Centenary Bank' },
+  { code: 'UG010500', name: 'Absa Bank Uganda' },
+  { code: 'UG010600', name: 'MTN Mobile Money Uganda' },
+  { code: 'UG010700', name: 'Airtel Money Uganda' },
 ];
 
 module.exports = new KoraService();
